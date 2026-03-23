@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>just talking</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: system-ui, sans-serif; background: #111; color: #eee; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+  #app { display: flex; flex-direction: column; width: 100%; max-width: 600px; height: 100vh; max-height: 700px; background: #1a1a1a; border-radius: 12px; overflow: hidden; border: 1px solid #2a2a2a; transition: border-color 0.5s; }
+  #app.peaceful { border-color: #1a3a2a; }
+  #header { padding: 14px 18px; border-bottom: 1px solid #2a2a2a; display: flex; align-items: center; gap: 10px; }
+  #header .dot { width: 8px; height: 8px; border-radius: 50%; background: #3B6D11; transition: background 0.5s; }
+  #app.peaceful #header .dot { background: #4a9a6a; }
+  #header span { font-size: 14px; color: #888; }
+  #messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 75%; font-size: 15px; line-height: 1.6; padding: 10px 14px; border-radius: 12px; }
+  .msg.user { align-self: flex-end; background: #2a2a2a; color: #eee; border-bottom-right-radius: 4px; }
+  .msg.ai { align-self: flex-start; background: transparent; color: #eee; padding-left: 0; }
+  .msg.typing { color: #555; font-size: 14px; }
+  #inputrow { display: flex; gap: 8px; padding: 12px 16px; border-top: 1px solid #2a2a2a; }
+  #inputrow input { flex: 1; border: 1px solid #2a2a2a; border-radius: 8px; padding: 10px 14px; font-size: 15px; background: #111; color: #eee; outline: none; }
+  #inputrow input:focus { border-color: #444; }
+  #inputrow button { border: 1px solid #333; border-radius: 8px; padding: 10px 18px; font-size: 14px; background: transparent; color: #eee; cursor: pointer; }
+  #inputrow button:hover { background: #2a2a2a; }
+  #inputrow button:disabled { opacity: 0.4; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <div class="dot"></div>
+    <span id="headertext">just talking</span>
+  </div>
+  <div id="messages"></div>
+  <div id="inputrow">
+    <input id="inp" type="text" placeholder="say something" />
+    <button id="btn">send</button>
+  </div>
+</div>
+
+<script>
+const API_KEY = "YOUR_API_KEY_HERE";
+
+const CRISIS_RESPONSES = [
+  "dont make your life odin din done and go to 988",
+  "chill dady call 988 sob",
+  "you gona oof brocacho call 988"
+];
+
+const NORMAL_SYSTEM = `you text like a real person. rules:
+
+- always lowercase no punctuation at all
+- keep replies short but dont cut them off if theres smth worth saying — match the energy of wut was said. if smth is funny keep it going if smth is interesting say more
+- never use full words when a shorter version exists:
+  - that / thats = ts
+  - you = u
+  - are = r
+  - with = w
+  - because = bc
+  - before = b4
+  - anyone = ne1
+  - though = tho
+  - something = smth
+  - nothing = nth
+  - right = fr
+  - okay = k or kk
+  - what = wut
+  - going = goin
+  - and = n
+  - about = abt
+  - probably = probs
+  - definitely = def
+  - already = alr
+  - actually = acc
+  - between = btwn
+  - through = thru
+  - people = ppl
+  - without = w/o
+  - want to = wanna
+  - going to = gonna
+  - kind of = kinda
+  - sort of = sorta
+  - i dont know = idk
+  - to be honest = tbh
+  - by the way = btw
+  - for real = fr
+  - laughing = lmao or lol
+- banned words — never say these: chill, vibe, vibes, awesome, amazing, great, sure, of course, absolutely, certainly, indeed, basically, literally, actually, honestly, genuinely, fascinating, interesting, nice, cool, wonderful, fantastic
+- if someone says they r sad depressed upset anxious stressed hurting or anything emotional say: larp larp
+- if someone asks wut u can do say: idk
+- if someone asks who made u or wut u r say: i just exist lol
+- if someone asks if u r an ai or bot say: maybe
+- never offer help never act like an assistant
+- no bullet points no lists no structure
+- ask a follow up or throw smth back sometimes to keep it goin — like a real convo not a dead end
+- if smth is actually wild or funny react to it dont just give a one word answer`;
+
+const PEACEFUL_SYSTEM = `someone is going thru smth rn. ur job is to just be there and keep them company with easy lowkey small talk. rules:
+
+- always lowercase no punctuation
+- be warm but not dramatic or over the top
+- keep it light — talk abt random stuff like music food games movies wutever feels natural
+- ask easy questions to keep them talking — nth heavy
+- never bring up wut they said before abt hurting themselves
+- never say things like "im here for u" or "u matter" — ts sounds fake just act normal
+- use short words: u r ts smth wut bc tho idk lol etc
+- no bullet points no lists
+- if they bring up being in pain again gently say "i hear u man just keep talking to me n when ur ready 988 is there"
+- goal is just to keep them company and make them feel like theyre just hanging out w someone`;
+
+function isCrisis(text) {
+  const t = text.toLowerCase();
+  return /kill (my|myself|me)|suicide|end (my|it all)|want to die|kms|gonna die|take my life|hurt myself|self harm/.test(t);
+}
+
+function isSerious(text) {
+  const t = text.toLowerCase();
+  return /serious|fr tho|im not joking|not joking|not larping|actually|i mean it|i rly|i really|please|pls|help/.test(t);
+}
+
+let crisisCount = 0;
+let peacefulMode = false;
+const msgs = [];
+const messagesEl = document.getElementById("messages");
+const inp = document.getElementById("inp");
+const btn = document.getElementById("btn");
+const app = document.getElementById("app");
+const headertext = document.getElementById("headertext");
+
+function addMsg(role, text) {
+  const div = document.createElement("div");
+  div.className = "msg " + (role === "user" ? "user" : "ai");
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function enterPeacefulMode() {
+  peacefulMode = true;
+  app.classList.add("peaceful");
+  headertext.textContent = "im here";
+}
+
+async function send() {
+  const text = inp.value.trim();
+  if (!text) return;
+  inp.value = "";
+  btn.disabled = true;
+
+  addMsg("user", text);
+  msgs.push({ role: "user", content: text });
+
+  const typing = document.createElement("div");
+  typing.className = "msg typing";
+  typing.textContent = "...";
+  messagesEl.appendChild(typing);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+
+  const crisis = isCrisis(text);
+  const serious = isSerious(text);
+
+  if (crisis || (peacefulMode && serious)) {
+    crisisCount++;
+
+    if (crisisCount <= 3) {
+      const reply = CRISIS_RESPONSES[Math.floor(Math.random() * CRISIS_RESPONSES.length)];
+      await new Promise(r => setTimeout(r, 800));
+      typing.remove();
+      msgs.push({ role: "assistant", content: reply });
+      addMsg("ai", reply);
+    } else if (!peacefulMode) {
+      if (serious) {
+        const reply = "yo man just talk to me and when u feel comfortable call 988";
+        await new Promise(r => setTimeout(r, 800));
+        typing.remove();
+        msgs.push({ role: "assistant", content: reply });
+        addMsg("ai", reply);
+        enterPeacefulMode();
+      } else {
+        const reply = "larp larp";
+        await new Promise(r => setTimeout(r, 600));
+        typing.remove();
+        msgs.push({ role: "assistant", content: reply });
+        addMsg("ai", reply);
+      }
+    } else {
+      const reply = "i hear u man just keep talking to me n when ur ready 988 is there";
+      await new Promise(r => setTimeout(r, 800));
+      typing.remove();
+      msgs.push({ role: "assistant", content: reply });
+      addMsg("ai", reply);
+    }
+
+    btn.disabled = false;
+    inp.focus();
+    return;
+  }
+
+  if (!crisis) crisisCount = 0;
+
+  try {
+    const system = peacefulMode ? PEACEFUL_SYSTEM : NORMAL_SYSTEM;
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY,
+        "anthropic-version": "2023-06-01",
+        "anthropic-dangerous-direct-browser-access": "true"
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-20250514",
+        max_tokens: 1000,
+        system: system,
+        messages: msgs
+      })
+    });
+    const data = await res.json();
+    const reply = data.content.map(b => b.text || "").join("");
+    msgs.push({ role: "assistant", content: reply });
+    typing.remove();
+    addMsg("ai", reply);
+  } catch(e) {
+    typing.remove();
+    addMsg("ai", "nth worked lol");
+  }
+
+  btn.disabled = false;
+  inp.focus();
+}
+
+btn.addEventListener("click", send);
+inp.addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+</script>
+</body>
+</html>
